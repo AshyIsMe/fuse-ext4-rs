@@ -48,6 +48,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 
 [[package]]
+name = "bootsector"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1016d648f0ce0ef68c93a733e68f0c5a7136f316e703304f424d4ac3f62a6f73"
+dependencies = [
+ "crc",
+]
+
+[[package]]
 name = "build_const"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -132,6 +141,7 @@ name = "fuse-ext4-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bootsector",
  "ext4",
  "fuse_mt",
 ]

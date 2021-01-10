@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 anyhow = "1"
+bootsector = "0.1"
 fuse_mt = "0.5.1"
 ext4 = "0.7.0"
 

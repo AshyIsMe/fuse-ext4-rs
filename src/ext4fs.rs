@@ -32,10 +32,27 @@ impl FilesystemMT for Ext4FS {
     //Ok(())
     //}
 
+    // let mut block_device = std::io::BufReader::new(std::fs::File::open(&self.target).unwrap());
+    // let partitions = bootsector::list_partitions(&mut block_device, &bootsector::Options::default())
+    // .with_context(|| anyhow!("searching for partitions"))?;
+    // let block_device = bootsector::open_partition(block_device, partitions.get(0)
+    // .ok_or_else(|| anyhow!("there wasn't at least one partition"))?)
+    // .map_err(|e| anyhow!("opening partition 0: {:?}", e))?;
+
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
         println!("init");
 
         let mut block_device = std::io::BufReader::new(std::fs::File::open(&self.target).unwrap());
+        let partitions =
+            bootsector::list_partitions(&mut block_device, &bootsector::Options::default())
+                .expect("partitions");
+        let mut block_device = bootsector::open_partition(
+            block_device,
+            partitions
+                .get(0)
+                .expect("there wasn't at least one partition"),
+        )
+        .expect("open partition");
         let mut superblock = ext4::SuperBlock::new(&mut block_device).unwrap();
         let target_inode_number = superblock.resolve_path("/").unwrap().inode;
         println!("{}", target_inode_number);
