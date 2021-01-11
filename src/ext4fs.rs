@@ -3,63 +3,68 @@
 //
 
 use std::ffi::OsString;
-use std::fs::{File};
+use std::io::{Read, Seek};
+use std::path::Path;
 
+use anyhow::anyhow;
+use anyhow::Context;
 use fuse_mt::*;
+
+trait BlockDevice: Read + Seek {}
 
 pub struct Ext4FS {
     pub target: OsString,
-    pub superblock: Option<ext4::SuperBlock<std::io::BufReader<std::fs::File>>>,
+    pub superblock: ext4::SuperBlock<bootsector::RangeReader<std::io::BufReader<std::fs::File>>>,
 }
 
-impl Ext4FS
-{
-    pub fn new(target: OsString) -> Self {
-        println!("Ext4FS.new()");
+impl Ext4FS {
+    pub fn new(target: OsString) -> anyhow::Result<Self> {
+        let mut block_device = std::io::BufReader::new(std::fs::File::open(&target).unwrap());
+        let partitions =
+            bootsector::list_partitions(&mut block_device, &bootsector::Options::default())
+                .with_context(|| anyhow!("searching for partitions"))?;
+        let block_device = bootsector::open_partition(
+            block_device,
+            partitions
+                .get(0)
+                .ok_or_else(|| anyhow!("there wasn't at least one partition"))?,
+        )
+        .map_err(|e| anyhow!("opening partition 0: {:?}", e))?;
 
-        let block_device = std::io::BufReader::new(File::open(&target).unwrap());
-        let superblock = ext4::SuperBlock::new(block_device).unwrap();
+        let superblock =
+            ext4::SuperBlock::new(block_device).with_context(|| anyhow!("opening partition"))?;
 
-        Self {
-            target,
-            superblock: Some(superblock),
-        }
+        Ok(Self { target, superblock })
     }
 }
 
 impl FilesystemMT for Ext4FS {
-
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
-        println!("init");
-
         Ok(())
     }
+
+    fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
+        println!("{:?}", path);
+        if path != Path::new("/") {
+            return Err(libc::ENOENT);
+        }
+        Ok((
+            time::Timespec::new(0, 0),
+            FileAttr {
+                size: 0,
+                blocks: 0,
+                atime: time::Timespec::new(0, 0),
+                mtime: time::Timespec::new(0, 0),
+                ctime: time::Timespec::new(0, 0),
+                crtime: time::Timespec::new(0, 0),
+                kind: FileType::Directory,
+                perm: 0,
+                nlink: 0,
+                uid: 0,
+                gid: 0,
+                rdev: 0,
+                flags: 0,
+            },
+        ))
+    }
 }
-
-    // let mut block_device = std::io::BufReader::new(std::fs::File::open(&self.target).unwrap());
-    // let partitions = bootsector::list_partitions(&mut block_device, &bootsector::Options::default())
-    // .with_context(|| anyhow!("searching for partitions"))?;
-    // let block_device = bootsector::open_partition(block_device, partitions.get(0)
-    // .ok_or_else(|| anyhow!("there wasn't at least one partition"))?)
-    // .map_err(|e| anyhow!("opening partition 0: {:?}", e))?;
-
-    //fn init(&self, _req: RequestInfo) -> ResultEmpty {
-        //println!("init");
-
-        //let mut block_device = std::io::BufReader::new(std::fs::File::open(&self.target).unwrap());
-        //let partitions =
-            //bootsector::list_partitions(&mut block_device, &bootsector::Options::default())
-                //.expect("partitions");
-        //let mut block_device = bootsector::open_partition(
-            //block_device,
-            //partitions
-                //.get(0)
-                //.expect("there wasn't at least one partition"),
-        //)
-        //.expect("open partition");
-        //let mut superblock = ext4::SuperBlock::new(&mut block_device).unwrap();
-        //let target_inode_number = superblock.resolve_path("/").unwrap().inode;
-        //println!("{}", target_inode_number);
-
-        //Ok(())
-    //}
