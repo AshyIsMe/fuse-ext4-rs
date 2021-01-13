@@ -19,17 +19,35 @@ pub struct Ext4FS {
 
 impl Ext4FS {
     pub fn new(target: OsString) -> anyhow::Result<Self> {
+        let metadata = std::fs::metadata(&target)?;
         let mut block_device = std::io::BufReader::new(std::fs::File::open(&target).unwrap());
+
+        // TODO - this errors out instead of resulting in an empty Vec<>
         let partitions =
             bootsector::list_partitions(&mut block_device, &bootsector::Options::default())
                 .with_context(|| anyhow!("searching for partitions"))?;
-        let block_device = bootsector::open_partition(
-            block_device,
-            partitions
-                .get(0)
-                .ok_or_else(|| anyhow!("there wasn't at least one partition"))?,
-        )
-        .map_err(|e| anyhow!("opening partition 0: {:?}", e))?;
+
+        let block_device = if partitions.len() == 0 {
+            let partition = bootsector::Partition{
+                id: 0,
+                first_byte: 0,
+                len: metadata.len(),
+                attributes: bootsector::Attributes::MBR{ bootable: false, type_code: 0, },
+            };
+            bootsector::open_partition(
+                block_device,
+                &partition,
+            )
+            .map_err(|e| anyhow!("opening partition 0: {:?}", e))?
+        } else {
+            bootsector::open_partition(
+                block_device,
+                partitions
+                    .get(0)
+                    .ok_or_else(|| anyhow!("there wasn't at least one partition"))?,
+            )
+            .map_err(|e| anyhow!("opening partition 0: {:?}", e))?
+        };
 
         let superblock =
             ext4::SuperBlock::new(block_device).with_context(|| anyhow!("opening partition"))?;
