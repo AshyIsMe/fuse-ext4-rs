@@ -52,6 +52,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cntr-fuse-sys"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ae3892895a649be4477b275deeca4a4f5e64f31c7986eb3dab81d6cfa88491a"
+dependencies = [
+ "pkg-config",
+]
+
+[[package]]
 name = "crc"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -92,6 +101,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bootsector",
+ "cntr-fuse-sys",
  "ext4",
  "fuse_mt",
  "libc",
