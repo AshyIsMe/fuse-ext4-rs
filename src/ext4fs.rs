@@ -51,6 +51,8 @@ impl Ext4FS {
     }
 }
 
+const ONLY_FH: u64 = 5318008;
+
 impl FilesystemMT for Ext4FS {
     fn init(&self, _req: RequestInfo) -> ResultEmpty {
         Ok(())
@@ -71,13 +73,37 @@ impl FilesystemMT for Ext4FS {
                 ctime: time::Timespec::new(0, 0),
                 crtime: time::Timespec::new(0, 0),
                 kind: FileType::Directory,
-                perm: 0,
+                perm: 0o0777,
                 nlink: 0,
-                uid: 0,
-                gid: 0,
+                uid: 666,
+                gid: 666,
                 rdev: 0,
                 flags: 0,
             },
         ))
+    }
+
+    fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
+        if Path::new("/") == path {
+            Ok((ONLY_FH, 0))
+        } else {
+            Err(libc::ENOENT)
+        }
+    }
+
+    fn readdir(&self, _req: RequestInfo, _path: &Path, fh: u64) -> ResultReaddir {
+        if ONLY_FH == fh {
+            Ok(vec![])
+        } else {
+            Err(libc::EBADF)
+        }
+    }
+
+    fn releasedir(&self, _req: RequestInfo, _path: &Path, fh: u64, _flags: u32) -> ResultEmpty {
+        if ONLY_FH == fh {
+            Ok(())
+        } else {
+            Err(libc::EBADF)
+        }
     }
 }
