@@ -15,4 +15,5 @@ libc = "0.2"
 time = "0.1"
 
 [dev-dependencies]
+cntr-fuse-sys = "0.4.0"
 nix = "0.19"
