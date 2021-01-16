@@ -3,18 +3,19 @@
 //
 
 use std::ffi::OsString;
-use std::io::{Read, Seek};
+use std::io::{self, Read, Seek};
 use std::path::Path;
 
 use anyhow::anyhow;
 use anyhow::Context;
 use fuse_mt::*;
 
-trait BlockDevice: Read + Seek {}
+pub trait BlockDevice: Read + Seek + Send + Sync {}
+impl<T: Seek + Read + Send + Sync> BlockDevice for T {}
 
 pub struct Ext4FS {
     pub target: OsString,
-    pub superblock: ext4::SuperBlock<bootsector::RangeReader<std::io::BufReader<std::fs::File>>>,
+    pub superblock: ext4::SuperBlock<Box<dyn BlockDevice>>,
 }
 
 impl Ext4FS {
@@ -22,31 +23,25 @@ impl Ext4FS {
         let metadata = std::fs::metadata(&target)?;
         let mut block_device = std::io::BufReader::new(std::fs::File::open(&target).unwrap());
 
-        // TODO - this errors out instead of resulting in an empty Vec<>
         let partitions =
-            bootsector::list_partitions(&mut block_device, &bootsector::Options::default())
-                .with_context(|| anyhow!("searching for partitions"))?;
-
-        let block_device = if partitions.len() == 0 {
-            let partition = bootsector::Partition{
-                id: 0,
-                first_byte: 0,
-                len: metadata.len(),
-                attributes: bootsector::Attributes::MBR{ bootable: false, type_code: 0, },
+            match bootsector::list_partitions(&mut block_device, &bootsector::Options::default()) {
+                Ok(parts) => parts,
+                Err(e) if io::ErrorKind::NotFound == e.kind() => vec![],
+                Err(e) => Err(e).with_context(|| anyhow!("searching for partitions"))?,
             };
-            bootsector::open_partition(
-                block_device,
-                &partition,
-            )
-            .map_err(|e| anyhow!("opening partition 0: {:?}", e))?
+
+        let block_device: Box<dyn BlockDevice> = if partitions.len() == 0 {
+            Box::new(block_device)
         } else {
-            bootsector::open_partition(
-                block_device,
-                partitions
-                    .get(0)
-                    .ok_or_else(|| anyhow!("there wasn't at least one partition"))?,
+            Box::new(
+                bootsector::open_partition(
+                    block_device,
+                    partitions
+                        .get(0)
+                        .ok_or_else(|| anyhow!("there wasn't at least one partition"))?,
+                )
+                .map_err(|e| anyhow!("opening partition 0: {:?}", e))?,
             )
-            .map_err(|e| anyhow!("opening partition 0: {:?}", e))?
         };
 
         let superblock =
