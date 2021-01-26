@@ -2,12 +2,16 @@
 //
 //
 
+use std::convert::TryFrom;
 use std::ffi::OsString;
 use std::io::{self, Read, Seek};
 use std::path::Path;
+use std::sync::Mutex;
 
 use anyhow::anyhow;
 use anyhow::Context;
+use ext4::Enhanced;
+use ext4::FileType as ExtFileType;
 use fuse_mt::*;
 
 pub trait BlockDevice: Read + Seek + Send + Sync {}
@@ -15,7 +19,7 @@ impl<T: Seek + Read + Send + Sync> BlockDevice for T {}
 
 pub struct Ext4FS {
     pub target: OsString,
-    pub superblock: ext4::SuperBlock<Box<dyn BlockDevice>>,
+    pub superblock: Mutex<ext4::SuperBlock<Box<dyn BlockDevice>>>,
 }
 
 impl Ext4FS {
@@ -44,8 +48,9 @@ impl Ext4FS {
             )
         };
 
-        let superblock =
-            ext4::SuperBlock::new(block_device).with_context(|| anyhow!("opening partition"))?;
+        let superblock = Mutex::new(
+            ext4::SuperBlock::new(block_device).with_context(|| anyhow!("opening partition"))?,
+        );
 
         Ok(Self { target, superblock })
     }
@@ -84,18 +89,50 @@ impl FilesystemMT for Ext4FS {
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
-        if Path::new("/") == path {
-            Ok((ONLY_FH, 0))
-        } else {
-            Err(libc::ENOENT)
+        // let inode = self.superblock.resolve_path(path.to_str().unwrap()).unwrap().inode;
+
+        // match self.superblock.resolve_path(path.to_str().unwrap()) {
+        let mut superblock = self.superblock.lock().expect("poison");
+        let result = superblock.resolve_path(path.to_str().unwrap());
+        match result {
+            Ok(dirent) => {
+                // TODO inode is not a filehandle (maybe?) (absolutely not)
+                let filehandle = dirent.inode.into();
+                Ok((filehandle, 0))
+            }
+            Err(e) => {
+                println!("opendir() error: {:?}", e);
+                Err(libc::ENOENT)
+            }
         }
     }
 
     fn readdir(&self, _req: RequestInfo, _path: &Path, fh: u64) -> ResultReaddir {
-        if ONLY_FH == fh {
-            Ok(vec![])
-        } else {
-            Err(libc::EBADF)
+        let mut superblock = self.superblock.lock().expect("poison");
+        let inode = superblock
+            .load_inode(u32::try_from(fh).expect("definitely not an inode"))
+            .expect("invalid inode");
+        match superblock.enhance(&inode).expect("valid inode") {
+            Enhanced::Directory(entries) => Ok(entries
+                .into_iter()
+                .map(|e| DirectoryEntry {
+                    name: OsString::from(e.name),
+                    kind: match e.file_type {
+                        ExtFileType::RegularFile => FileType::RegularFile,
+                        ExtFileType::SymbolicLink => FileType::Symlink,
+                        ExtFileType::CharacterDevice => FileType::CharDevice,
+                        ExtFileType::BlockDevice => FileType::BlockDevice,
+                        ExtFileType::Directory => FileType::Directory,
+                        // TODO: maybe?
+                        ExtFileType::Fifo => FileType::NamedPipe,
+                        ExtFileType::Socket => FileType::Socket,
+                    },
+                })
+                .collect()),
+            item => {
+                eprintln!("readdir on non-directory {:?}", item);
+                Err(libc::EBADE)
+            }
         }
     }
 
