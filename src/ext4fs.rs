@@ -2,20 +2,21 @@
 //
 //
 
-use std::convert::TryFrom;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::Path;
 
 use anyhow::anyhow;
 use anyhow::Context;
+use ext4::Enhanced;
 use ext4::FileType as ExtFileType;
-use ext4::{Enhanced, SuperBlock};
+use ext4::SuperBlock;
 use fuse_mt::*;
 use time::Timespec;
 
 use crate::block_device::open_raw_or_first_partition;
 use crate::block_device::BlockDevice;
+use crate::fh::inode_from_fh_or_path;
 
 pub struct Ext4FS {
     pub target: OsString,
@@ -242,11 +243,8 @@ impl FilesystemMT for Ext4FS {
         }
     }
 
-    fn readdir(&self, _req: RequestInfo, _path: &Path, fh: u64) -> ResultReaddir {
-        let inode = self
-            .superblock
-            .load_inode(u32::try_from(fh).expect("definitely not an inode"))
-            .expect("invalid inode");
+    fn readdir(&self, _req: RequestInfo, path: &Path, fh: u64) -> ResultReaddir {
+        let inode = inode_from_fh_or_path(&self.superblock, Some(fh), path)?;
         match self.superblock.enhance(&inode).expect("valid inode") {
             Enhanced::Directory(entries) => Ok(entries
                 .into_iter()
