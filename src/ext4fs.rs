@@ -15,7 +15,7 @@ use time::Timespec;
 
 use crate::block_device::open_raw_or_first_partition;
 use crate::block_device::BlockDevice;
-use crate::fh::inode_from_fh_or_path;
+use crate::fh::{inode_from_fh_or_path, read_buf};
 use crate::mappe::{map_kind, timespec};
 
 pub struct Ext4FS {
@@ -186,20 +186,28 @@ impl FilesystemMT for Ext4FS {
         Err(libc::EROFS)
     }
 
-    fn open(&self, _req: RequestInfo, _path: &Path, _flags: u32) -> ResultOpen {
-        Err(libc::ENOSYS)
+    fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
+        let rdonly = libc::O_RDONLY as u32;
+        if flags & (rdonly) != (rdonly) {
+            return Err(libc::EROFS);
+        }
+        let inode = inode_from_fh_or_path(&self.superblock, None, path)?;
+        Ok((u64::from(inode.number), rdonly))
     }
 
     fn read(
         &self,
         _req: RequestInfo,
-        _path: &Path,
-        _fh: u64,
-        _offset: u64,
-        _size: u32,
+        path: &Path,
+        fh: u64,
+        offset: u64,
+        size: u32,
         callback: impl FnOnce(ResultSlice<'_>) -> CallbackResult,
     ) -> CallbackResult {
-        callback(Err(libc::ENOSYS))
+        match read_buf(&self.superblock, fh, path, offset, size) {
+            Ok(buf) => callback(Ok(&buf)),
+            Err(e) => callback(Err(e)),
+        }
     }
 
     fn write(
@@ -227,7 +235,7 @@ impl FilesystemMT for Ext4FS {
         _lock_owner: u64,
         _flush: bool,
     ) -> ResultEmpty {
-        Err(libc::ENOSYS)
+        Ok(())
     }
 
     fn fsync(&self, _req: RequestInfo, _path: &Path, _fh: u64, _datasync: bool) -> ResultEmpty {
