@@ -4,28 +4,34 @@
 
 use std::convert::TryFrom;
 use std::ffi::OsString;
-use std::io::{self, Read, Seek};
+use std::io;
 use std::path::Path;
-use std::sync::Mutex;
 
 use anyhow::anyhow;
 use anyhow::Context;
 use ext4::Enhanced;
 use ext4::FileType as ExtFileType;
 use fuse_mt::*;
+use positioned_io::ReadAt;
 
-pub trait BlockDevice: Read + Seek + Send + Sync {}
-impl<T: Seek + Read + Send + Sync> BlockDevice for T {}
+pub trait BlockDevice: ReadAt + Send + Sync {}
+impl<T: ReadAt + Send + Sync> BlockDevice for T {}
+
+impl ReadAt for Box<dyn BlockDevice> {
+    fn read_at(&self, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
+        (**self).read_at(pos, buf)
+    }
+}
 
 pub struct Ext4FS {
     pub target: OsString,
-    pub superblock: Mutex<ext4::SuperBlock<Box<dyn BlockDevice>>>,
+    pub superblock: ext4::SuperBlock<Box<dyn BlockDevice>>,
 }
 
 impl Ext4FS {
     pub fn new(target: OsString) -> anyhow::Result<Self> {
         let metadata = std::fs::metadata(&target)?;
-        let mut block_device = std::io::BufReader::new(std::fs::File::open(&target).unwrap());
+        let mut block_device = std::fs::File::open(&target).unwrap();
 
         let partitions =
             match bootsector::list_partitions(&mut block_device, &bootsector::Options::default()) {
@@ -37,20 +43,18 @@ impl Ext4FS {
         let block_device: Box<dyn BlockDevice> = if partitions.len() == 0 {
             Box::new(block_device)
         } else {
-            Box::new(
-                bootsector::open_partition(
-                    block_device,
-                    partitions
-                        .get(0)
-                        .ok_or_else(|| anyhow!("there wasn't at least one partition"))?,
-                )
-                .map_err(|e| anyhow!("opening partition 0: {:?}", e))?,
-            )
+            let part = partitions
+                .get(0)
+                .ok_or_else(|| anyhow!("there wasn't at least one partition"))?;
+            Box::new(positioned_io::Slice::new(
+                block_device,
+                part.first_byte,
+                Some(part.len),
+            ))
         };
 
-        let superblock = Mutex::new(
-            ext4::SuperBlock::new(block_device).with_context(|| anyhow!("opening partition"))?,
-        );
+        let superblock =
+            ext4::SuperBlock::new(block_device).with_context(|| anyhow!("opening partition"))?;
 
         Ok(Self { target, superblock })
     }
@@ -92,8 +96,7 @@ impl FilesystemMT for Ext4FS {
         // let inode = self.superblock.resolve_path(path.to_str().unwrap()).unwrap().inode;
 
         // match self.superblock.resolve_path(path.to_str().unwrap()) {
-        let mut superblock = self.superblock.lock().expect("poison");
-        let result = superblock.resolve_path(path.to_str().unwrap());
+        let result = self.superblock.resolve_path(path.to_str().unwrap());
         match result {
             Ok(dirent) => {
                 // TODO inode is not a filehandle (maybe?) (absolutely not)
@@ -108,11 +111,11 @@ impl FilesystemMT for Ext4FS {
     }
 
     fn readdir(&self, _req: RequestInfo, _path: &Path, fh: u64) -> ResultReaddir {
-        let mut superblock = self.superblock.lock().expect("poison");
-        let inode = superblock
+        let inode = self
+            .superblock
             .load_inode(u32::try_from(fh).expect("definitely not an inode"))
             .expect("invalid inode");
-        match superblock.enhance(&inode).expect("valid inode") {
+        match self.superblock.enhance(&inode).expect("valid inode") {
             Enhanced::Directory(entries) => Ok(entries
                 .into_iter()
                 .map(|e| DirectoryEntry {
