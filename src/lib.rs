@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 
 use anyhow::Result;
 
+mod block_device;
 mod ext4fs;
 
 pub fn mount_and_run(what: &OsStr, whence: &OsStr) -> Result<()> {

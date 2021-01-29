@@ -5,25 +5,17 @@
 use std::convert::TryFrom;
 use std::ffi::OsStr;
 use std::ffi::OsString;
-use std::io;
 use std::path::Path;
 
 use anyhow::anyhow;
 use anyhow::Context;
-use ext4::Enhanced;
 use ext4::FileType as ExtFileType;
+use ext4::{Enhanced, SuperBlock};
 use fuse_mt::*;
-use positioned_io::ReadAt;
 use time::Timespec;
 
-pub trait BlockDevice: ReadAt + Send + Sync {}
-impl<T: ReadAt + Send + Sync> BlockDevice for T {}
-
-impl ReadAt for Box<dyn BlockDevice> {
-    fn read_at(&self, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
-        (**self).read_at(pos, buf)
-    }
-}
+use crate::block_device::open_raw_or_first_partition;
+use crate::block_device::BlockDevice;
 
 pub struct Ext4FS {
     pub target: OsString,
@@ -32,33 +24,14 @@ pub struct Ext4FS {
 
 impl Ext4FS {
     pub fn new(target: OsString) -> anyhow::Result<Self> {
-        let metadata = std::fs::metadata(&target)?;
-        let mut block_device = std::fs::File::open(&target).unwrap();
-
-        let partitions =
-            match bootsector::list_partitions(&mut block_device, &bootsector::Options::default()) {
-                Ok(parts) => parts,
-                Err(e) if io::ErrorKind::NotFound == e.kind() => vec![],
-                Err(e) => Err(e).with_context(|| anyhow!("searching for partitions"))?,
-            };
-
-        let block_device: Box<dyn BlockDevice> = if partitions.len() == 0 {
-            Box::new(block_device)
-        } else {
-            let part = partitions
-                .get(0)
-                .ok_or_else(|| anyhow!("there wasn't at least one partition"))?;
-            Box::new(positioned_io::Slice::new(
-                block_device,
-                part.first_byte,
-                Some(part.len),
-            ))
-        };
-
-        let superblock =
-            ext4::SuperBlock::new(block_device).with_context(|| anyhow!("opening partition"))?;
-
-        Ok(Self { target, superblock })
+        Ok(Self {
+            superblock: SuperBlock::new(
+                open_raw_or_first_partition(&target)
+                    .with_context(|| anyhow!("opening file/partition"))?,
+            )
+            .with_context(|| anyhow!("loading filesystem"))?,
+            target,
+        })
     }
 }
 

@@ -1,8 +1,5 @@
-use std::convert::TryFrom;
-use std::ffi::OsString;
-use std::ffi::{CString, OsStr};
+use std::ffi::CString;
 use std::fs;
-use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
