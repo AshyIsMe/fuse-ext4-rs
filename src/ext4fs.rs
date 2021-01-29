@@ -206,7 +206,7 @@ impl FilesystemMT for Ext4FS {
     }
 
     fn flush(&self, _req: RequestInfo, _path: &Path, _fh: u64, _lock_owner: u64) -> ResultEmpty {
-        Err(libc::EROFS)
+        Err(libc::ENOSYS)
     }
 
     fn release(
