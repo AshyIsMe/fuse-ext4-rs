@@ -103,7 +103,7 @@ impl FilesystemMT for Ext4FS {
         _atime: Option<Timespec>,
         _mtime: Option<Timespec>,
     ) -> ResultEmpty {
-        Err(libc::ENOSYS)
+        Err(libc::EROFS)
     }
 
     fn utimens_macos(
@@ -116,11 +116,20 @@ impl FilesystemMT for Ext4FS {
         _bkuptime: Option<Timespec>,
         _flags: Option<u32>,
     ) -> ResultEmpty {
-        Err(libc::ENOSYS)
+        Err(libc::EROFS)
     }
 
-    fn readlink(&self, _req: RequestInfo, _path: &Path) -> ResultData {
-        Err(libc::ENOSYS)
+    fn readlink(&self, _req: RequestInfo, path: &Path) -> ResultData {
+        let inode = inode_from_fh_or_path(&self.superblock, None, path)?;
+        match self.superblock.enhance(&inode) {
+            Ok(Enhanced::SymbolicLink(dest)) => Ok(dest.as_bytes().to_vec()),
+            // man:readlink(2): EINVAL: not a symbolic link
+            Ok(_) => Err(libc::EINVAL),
+            Err(e) => {
+                eprintln!("readlink: unexpected error: {:?}: {:?}", path, e);
+                Err(libc::EIO)
+            }
+        }
     }
 
     fn mknod(
