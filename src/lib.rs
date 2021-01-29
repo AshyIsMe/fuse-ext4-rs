@@ -5,6 +5,7 @@ use anyhow::Result;
 mod block_device;
 mod ext4fs;
 mod fh;
+mod mappe;
 
 pub fn mount_and_run(what: &OsStr, whence: &OsStr) -> Result<()> {
     let filesystem = ext4fs::Ext4FS::new(what.to_os_string())?;

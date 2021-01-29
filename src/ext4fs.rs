@@ -9,7 +9,6 @@ use std::path::Path;
 use anyhow::anyhow;
 use anyhow::Context;
 use ext4::Enhanced;
-use ext4::FileType as ExtFileType;
 use ext4::SuperBlock;
 use fuse_mt::*;
 use time::Timespec;
@@ -17,6 +16,7 @@ use time::Timespec;
 use crate::block_device::open_raw_or_first_partition;
 use crate::block_device::BlockDevice;
 use crate::fh::inode_from_fh_or_path;
+use crate::mappe::{map_kind, timespec};
 
 pub struct Ext4FS {
     pub target: OsString,
@@ -45,25 +45,25 @@ impl FilesystemMT for Ext4FS {
 
     fn destroy(&self, _req: RequestInfo) {}
 
-    fn getattr(&self, _req: RequestInfo, path: &Path, _fh: Option<u64>) -> ResultEntry {
-        println!("{:?}", path);
-        if path != Path::new("/") {
-            return Err(libc::ENOENT);
-        }
+    fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
+        let stat = inode_from_fh_or_path(&self.superblock, fh, path)?.stat;
         Ok((
             time::Timespec::new(0, 0),
             FileAttr {
-                size: 0,
+                size: stat.size,
                 blocks: 0,
-                atime: time::Timespec::new(0, 0),
-                mtime: time::Timespec::new(0, 0),
-                ctime: time::Timespec::new(0, 0),
-                crtime: time::Timespec::new(0, 0),
-                kind: FileType::Directory,
-                perm: 0o0777,
-                nlink: 0,
-                uid: 666,
-                gid: 666,
+                atime: timespec(stat.atime),
+                mtime: timespec(stat.mtime),
+                ctime: timespec(stat.ctime),
+                crtime: stat
+                    .btime
+                    .map(|t| timespec(t))
+                    .unwrap_or(time::Timespec::new(0, 0)),
+                kind: map_kind(stat.extracted_type),
+                perm: stat.file_mode,
+                nlink: u32::from(stat.link_count),
+                uid: stat.uid,
+                gid: stat.gid,
                 rdev: 0,
                 flags: 0,
             },
@@ -250,16 +250,7 @@ impl FilesystemMT for Ext4FS {
                 .into_iter()
                 .map(|e| DirectoryEntry {
                     name: OsString::from(e.name),
-                    kind: match e.file_type {
-                        ExtFileType::RegularFile => FileType::RegularFile,
-                        ExtFileType::SymbolicLink => FileType::Symlink,
-                        ExtFileType::CharacterDevice => FileType::CharDevice,
-                        ExtFileType::BlockDevice => FileType::BlockDevice,
-                        ExtFileType::Directory => FileType::Directory,
-                        // TODO: maybe?
-                        ExtFileType::Fifo => FileType::NamedPipe,
-                        ExtFileType::Socket => FileType::Socket,
-                    },
+                    kind: map_kind(e.file_type),
                 })
                 .collect()),
             item => {
