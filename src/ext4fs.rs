@@ -72,24 +72,38 @@ impl FilesystemMT for Ext4FS {
         if path != Path::new("/") {
             return Err(libc::ENOENT);
         }
-        Ok((
-            time::Timespec::new(0, 0),
-            FileAttr {
-                size: 0,
-                blocks: 0,
-                atime: time::Timespec::new(0, 0),
-                mtime: time::Timespec::new(0, 0),
-                ctime: time::Timespec::new(0, 0),
-                crtime: time::Timespec::new(0, 0),
-                kind: FileType::Directory,
-                perm: 0o0777,
-                nlink: 0,
-                uid: 666,
-                gid: 666,
-                rdev: 0,
-                flags: 0,
-            },
-        ))
+
+        #AA TODO load_inode and get Stat
+
+        let result = self.superblock.resolve_path(path.to_str().unwrap());
+        match result {
+            Ok(dirent) => {
+                let i = dirent.inode.into();
+                let inode = self.superblock.load_inode(i)?;
+                Ok((
+                    time::Timespec::new(0, 0),
+                    FileAttr {
+                        size: inode.stat.size,
+                        blocks: 0,
+                        atime: time::Timespec::new(0, 0),
+                        mtime: time::Timespec::new(0, 0),
+                        ctime: time::Timespec::new(0, 0),
+                        crtime: time::Timespec::new(0, 0),
+                        kind: FileType::Directory,
+                        perm: 0o0777,
+                        nlink: 0,
+                        uid: 666,
+                        gid: 666,
+                        rdev: 0,
+                        flags: 0,
+                    },
+                ))
+            }
+            Err(e) => {
+                println!("getattr() error: {:?}", e);
+                Err(libc::ENOENT)
+            }
+        }
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
